@@ -422,8 +422,10 @@ def _filter_opportunistic_candidates(
 def _reset_preference_bucket(state: AccountState, current: float, window: ResetPreferenceWindow) -> int:
     if window == "primary":
         reset_at = state.primary_reset_at
-        if reset_at is None:
-            reset_at = state.priority_reset_at if state.priority_reset_at is not None else state.secondary_reset_at
+        # Missing/expired evidence does not establish an unstarted window.
+        # A weekly deadline must not masquerade as a short-window deadline.
+        if reset_at is None or reset_at <= current:
+            return UNKNOWN_RESET_BUCKET_DAYS * SECONDS_PER_DAY
     else:
         reset_at = state.priority_reset_at if state.priority_reset_at is not None else state.secondary_reset_at
         if reset_at is None:
@@ -502,8 +504,8 @@ def select_account(
             configured quota window resets sooner.
         prefer_earlier_reset_window: Quota window used for reset preference
             (``"primary"`` for short window or ``"secondary"`` for weekly),
-            with the other window used as fallback when the configured reset is
-            unavailable.
+            with unknown/expired primary deadlines ranked last. Secondary
+            preference retains its primary-window fallback.
         routing_strategy: Balancing strategy used to pick from the effective
             pool (``"capacity_weighted"``, ``"sequential_drain"``,
             ``"reset_drain"``, ``"single_account"``, ``"relative_availability"``,

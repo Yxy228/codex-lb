@@ -51,7 +51,7 @@ Account pages display each window as **percent remaining**; the sticky reallocat
 
 ### Prefer earlier reset
 
-When enabled and several accounts are otherwise eligible, selection is restricted to the accounts whose selected quota window (5h or weekly) resets soonest. Weekly resets are compared in whole-day buckets; when the selected window has no known reset time, the other window is used as a fallback. The preference applies to the `Capacity weighted`, `Usage weighted`, and `Fill first` strategies; the fixed-order and draw-based strategies (`Round robin`, `Relative availability`, `Sequential drain`, `Reset drain`, `Single account`) ignore it.
+When enabled and several accounts are otherwise eligible, selection is restricted to the accounts whose selected quota window (5h or weekly) resets soonest. Weekly resets are compared in whole-day buckets; primary preference ranks missing or expired primary deadlines after known future deadlines and never substitutes a weekly deadline. Zero usage alone does not prove a window is unstarted. Secondary preference retains its primary-window fallback when its reset time is unknown. The preference applies to the `Capacity weighted`, `Usage weighted`, and `Fill first` strategies; the fixed-order and draw-based strategies (`Round robin`, `Relative availability`, `Sequential drain`, `Reset drain`, `Single account`) ignore it.
 
 ### Relative latency weighting
 
