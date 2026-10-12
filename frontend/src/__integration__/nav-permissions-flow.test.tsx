@@ -24,6 +24,6 @@ describe("permission-aware navigation integration", () => {
     await waitFor(() => expect(window.location.pathname).toBe("/dashboard"));
     expect(await screen.findByRole("heading", { name: "Dashboard" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /Accounts/i })).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Reports/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Reports" })).toBeInTheDocument();
   });
 });

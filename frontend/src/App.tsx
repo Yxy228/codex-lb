@@ -27,6 +27,12 @@ import { useTimeFormatStore } from "@/hooks/use-time-format";
 const DashboardPage = lazy(() =>
   import("@/features/dashboard/components/dashboard-page").then((m) => ({ default: m.DashboardPage })),
 );
+const RequestRecordsPage = lazy(() =>
+  import("@/features/dashboard/components/request-records-page").then((m) => ({ default: m.RequestRecordsPage })),
+);
+const CacheAnalysisPage = lazy(() =>
+  import("@/features/cache-analysis/cache-analysis-page").then((m) => ({ default: m.CacheAnalysisPage })),
+);
 const ReportsPage = lazy(() =>
   import("@/features/reports/components/reports-page").then((m) => ({ default: m.ReportsPage })),
 );
@@ -118,6 +124,8 @@ export default function App() {
             <Route element={<RouteGuard />}>
               <Route path="/dashboard" element={<DashboardPage />} />
               <Route path="/reports" element={<ReportsPage />} />
+              <Route path="/reports/cache" element={<CacheAnalysisPage />} />
+              <Route path="/reports/requests" element={<RequestRecordsPage />} />
               <Route path="/accounts" element={<AccountsPage />} />
               <Route path="/automations" element={<AutomationsPage />} />
               <Route path="/apis" element={<ApisPage />} />

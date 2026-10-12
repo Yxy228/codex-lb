@@ -158,10 +158,10 @@ describe("guest restricted surfaces integration", () => {
     expect(restrictedRequests(paths)).toEqual([]);
   });
 
-  it("drops a URL-carried API-key filter and hides its control on /dashboard", async () => {
+  it("drops a URL-carried API-key filter and hides its control on /reports/requests", async () => {
     useGuestSession();
     const urls = spyRequestUrls();
-    window.history.pushState({}, "", "/dashboard?apiKeyId=key_1&status=success");
+    window.history.pushState({}, "", "/reports/requests?apiKeyId=key_1&status=success");
 
     renderWithProviders(<App />);
 
@@ -186,7 +186,7 @@ describe("guest restricted surfaces integration", () => {
 
   it("honours a URL-carried API-key filter and shows its control for writers (regression)", async () => {
     const urls = spyRequestUrls();
-    window.history.pushState({}, "", "/dashboard?apiKeyId=key_1");
+    window.history.pushState({}, "", "/reports/requests?apiKeyId=key_1");
 
     renderWithProviders(<App />);
 

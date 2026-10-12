@@ -1,15 +1,11 @@
-import { QueryClientProvider } from "@tanstack/react-query";
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
-import { BrowserRouter } from "react-router-dom";
 import { afterEach, describe, expect, it } from "vitest";
 
 import App from "@/App";
 import {
-  createAccountSummary,
   createDashboardOverview,
-  createDashboardProjections,
   createConversationEntry,
   createConversationsResponse,
   createDefaultRequestLogs,
@@ -34,8 +30,8 @@ afterEach(() => {
   queryClient.clear();
 });
 
-describe("dashboard flow integration", () => {
-  it("loads dashboard, refetches overview on overview-timeframe changes, and keeps request-log refetches isolated", async () => {
+describe("request records and dashboard flow integration", () => {
+  it("loads records, refetches overview on timeframe changes, and isolates request-log refetches", async () => {
     const user = userEvent.setup({ delay: null });
     const logs = createDefaultRequestLogs();
 
@@ -70,10 +66,10 @@ describe("dashboard flow integration", () => {
       ),
     );
 
-    window.history.pushState({}, "", "/dashboard");
+    window.history.pushState({}, "", "/reports/requests");
     renderWithProviders(<App />);
 
-    expect(await screen.findByRole("heading", { name: "Dashboard" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Request records" })).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "Request Logs" })).toBeInTheDocument();
 
     await waitFor(() => {
@@ -86,7 +82,7 @@ describe("dashboard flow integration", () => {
     expect(overviewTimeframes.at(-1)).toBe("7d");
 
     act(() => {
-      window.history.pushState({}, "", "/dashboard?overviewTimeframe=30d");
+      window.history.pushState({}, "", "/reports/requests?overviewTimeframe=30d");
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
 
@@ -117,171 +113,44 @@ describe("dashboard flow integration", () => {
     expect(overviewCalls).toBe(overviewAfterTimeframe);
   });
 
-  it("preserves healthy overview through initial request-log failure and Retry recovery", async () => {
+  it("keeps dashboard independent of a log outage and recovers logs on the records page", async () => {
     const user = userEvent.setup({ delay: null });
-    let overviewCalls = 0;
-    let projectionsCalls = 0;
     let requestLogCalls = 0;
-    let optionsCalls = 0;
     let requestLogsAvailable = false;
-    let releaseRecoveredResponse = () => {};
-    const recoveredResponseGate = new Promise<void>((resolve) => {
-      releaseRecoveredResponse = resolve;
-    });
-    const recoveredLog = createRequestLogEntry({
-      requestId: "req_recovered",
-      accountId: "acc_healthy_overview",
-      apiKeyName: "Recovered API Key",
-    });
-
-    const healthyAccount = createAccountSummary({
-      accountId: "acc_healthy_overview",
-      chatgptAccountId: "chatgpt_acc_healthy_overview",
-      email: "healthy-overview@example.com",
-      displayName: "Healthy Overview Account",
-      usage: {
-        primaryRemainingPercent: 61.3,
-        secondaryRemainingPercent: 88.3,
-        monthlyRemainingPercent: null,
-      },
-      capacityCreditsPrimary: 9_876,
-      remainingCreditsPrimary: 6_055,
-      remainingCreditsSecondary: 6_675.48,
-    });
-    const baseOverview = createDashboardOverview({ accounts: [healthyAccount] });
-    const overview = createDashboardOverview({
-      accounts: [healthyAccount],
-      summary: {
-        ...baseOverview.summary,
-        primaryWindow: {
-          ...baseOverview.summary.primaryWindow,
-          remainingPercent: 61.3,
-          capacityCredits: 9_876,
-          remainingCredits: 6_055,
-        },
-        metrics: {
-          ...baseOverview.summary.metrics!,
-          requests: 424_242,
-        },
-      },
-      windows: {
-        ...baseOverview.windows,
-        primary: {
-          ...baseOverview.windows.primary,
-          accounts: [
-            {
-              accountId: healthyAccount.accountId,
-              remainingPercentAvg: 61.3,
-              capacityCredits: 9_876,
-              remainingCredits: 6_055,
-            },
-          ],
-        },
-      },
-    });
-
     server.use(
-      http.get("/api/dashboard/overview", () => {
-        overviewCalls += 1;
-        return HttpResponse.json(overview);
-      }),
-      http.get("/api/dashboard/projections", () => {
-        projectionsCalls += 1;
-        return HttpResponse.json(createDashboardProjections());
-      }),
-      http.get("/api/request-logs/options", () => {
-        optionsCalls += 1;
-        return HttpResponse.json(createRequestLogFilterOptions());
-      }),
-      http.get("/api/request-logs", async () => {
+      http.get("/api/request-logs", () => {
         requestLogCalls += 1;
         if (!requestLogsAvailable) {
           return HttpResponse.json(
-            {
-              error: {
-                code: "forced_request_log_outage",
-                message: REQUEST_LOG_OUTAGE_MESSAGE,
-              },
-            },
+            { error: { code: "forced_request_log_outage", message: REQUEST_LOG_OUTAGE_MESSAGE } },
             { status: 500 },
           );
         }
-
-        await recoveredResponseGate;
-        return HttpResponse.json(createRequestLogsResponse([recoveredLog], 1, false));
+        return HttpResponse.json(createRequestLogsResponse([
+          createRequestLogEntry({ requestId: "req_recovered", apiKeyName: "Recovered API Key" }),
+        ], 1, false));
       }),
     );
-
     window.history.pushState({}, "", "/dashboard");
-    const { container } = render(
-      <QueryClientProvider client={queryClient}>
-        <BrowserRouter>
-          <App />
-        </BrowserRouter>
-      </QueryClientProvider>,
-    );
-
+    renderWithProviders(<App />);
     expect(await screen.findByRole("heading", { name: "Dashboard" })).toBeInTheDocument();
-    const requestLogsHeading = await screen.findByRole("heading", { name: "Request Logs" });
-    const requestLogsSection = requestLogsHeading.closest("section");
+    expect(await screen.findByRole("heading", { name: "5-Hour Credits" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Request Logs" })).not.toBeInTheDocument();
+    expect(requestLogCalls).toBe(0);
 
-    expect(requestLogsSection).not.toBeNull();
-    const requestLogs = within(requestLogsSection as HTMLElement);
-    const errorAlert = await requestLogs.findByRole("alert");
-
-    await waitFor(() => {
-      expect(overviewCalls).toBeGreaterThan(0);
-      expect(projectionsCalls).toBeGreaterThan(0);
-      expect(requestLogCalls).toBeGreaterThan(1);
-      expect(optionsCalls).toBeGreaterThan(0);
+    act(() => {
+      window.history.pushState({}, "", "/reports/requests");
+      window.dispatchEvent(new PopStateEvent("popstate"));
     });
-
-    const expectHealthySurfaces = () => {
-      expect(screen.getByText("Requests (7d)")).toBeInTheDocument();
-      expect(screen.getByText("424.24K")).toBeInTheDocument();
-      expect(screen.getByText("Account burn projection (5h/7d)")).toBeInTheDocument();
-      expect(screen.getByText("0.4 / 0.1")).toBeInTheDocument();
-      expect(screen.getByRole("heading", { name: "5-Hour Credits" })).toBeInTheDocument();
-      expect(screen.getByText("6,055")).toBeInTheDocument();
-      expect(
-        screen.getByRole("button", { name: "Enable limit warm-up for Healthy Overview Account" }),
-      ).toBeInTheDocument();
-    };
-
-    await waitFor(expectHealthySurfaces);
-    expect(screen.getByRole("heading", { name: "Accounts" })).toBeInTheDocument();
-    expect(container.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(0);
-    expect(errorAlert).toHaveTextContent(REQUEST_LOG_OUTAGE_MESSAGE);
-    expect(requestLogs.getByRole("button", { name: "Retry" })).toBeInTheDocument();
-
-    const overviewCallsBeforeRetry = overviewCalls;
-    const projectionsCallsBeforeRetry = projectionsCalls;
-    const requestLogCallsBeforeRetry = requestLogCalls;
-    const optionsCallsBeforeRetry = optionsCalls;
-    const retryButton = requestLogs.getByRole("button", { name: "Retry" });
+    const heading = await screen.findByRole("heading", { name: "Request Logs" });
+    const requestLogs = within(heading.closest("section")!);
+    expect(await requestLogs.findByRole("alert")).toHaveTextContent(REQUEST_LOG_OUTAGE_MESSAGE);
     requestLogsAvailable = true;
-
-    retryButton.focus();
-    expect(retryButton).toHaveFocus();
+    const retry = requestLogs.getByRole("button", { name: "Retry" });
+    retry.focus();
     await user.keyboard("{Enter}");
-    await waitFor(() => {
-      expect(requestLogCalls).toBe(requestLogCallsBeforeRetry + 1);
-    });
-
-    expectHealthySurfaces();
-    expect(container.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(0);
-    expect(overviewCalls).toBe(overviewCallsBeforeRetry);
-    expect(projectionsCalls).toBe(projectionsCallsBeforeRetry);
-    expect(optionsCalls).toBe(optionsCallsBeforeRetry);
-
-    releaseRecoveredResponse();
-    expect(await screen.findByText("Recovered API Key")).toBeInTheDocument();
-    expect(screen.queryByText(REQUEST_LOG_OUTAGE_MESSAGE)).not.toBeInTheDocument();
-    expectHealthySurfaces();
-    expect(container.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(0);
-    expect(overviewCalls).toBe(overviewCallsBeforeRetry);
-    expect(projectionsCalls).toBe(projectionsCallsBeforeRetry);
-    expect(optionsCalls).toBe(optionsCallsBeforeRetry);
+    expect(await requestLogs.findByText("Recovered API Key")).toBeVisible();
+    expect(requestLogs.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("keeps retained request-log rows through failed refresh and Retry recovery", async () => {
@@ -318,7 +187,7 @@ describe("dashboard flow integration", () => {
       }),
     );
 
-    window.history.pushState({}, "", "/dashboard");
+    window.history.pushState({}, "", "/reports/requests");
     const { queryClient: testQueryClient } = renderWithProviders(<App />);
 
     expect(await screen.findByText("Retained API Key")).toBeInTheDocument();
@@ -366,7 +235,7 @@ describe("dashboard flow integration", () => {
     window.history.pushState(
       {},
       "",
-      "/dashboard?search=requestlog&limit=10&offset=25&conversationSearch=opencode&conversationLimit=15&conversationOffset=7",
+      "/reports/requests?search=requestlog&limit=10&offset=25&conversationSearch=opencode&conversationLimit=15&conversationOffset=7",
     );
 
     renderWithProviders(<App />);
@@ -397,7 +266,7 @@ describe("dashboard flow integration", () => {
     expect(window.location.search).toContain("conversationOffset=7");
   });
 
-  it("refetches the overview (stat boxes) when the conversation timeframe changes", async () => {
+  it("refetches the overview when the conversation timeframe changes", async () => {
     const user = userEvent.setup({ delay: null });
 
     let overviewCalls = 0;
@@ -424,10 +293,10 @@ describe("dashboard flow integration", () => {
       ),
     );
 
-    window.history.pushState({}, "", "/dashboard?view=conversations&overviewTimeframe=1d");
+    window.history.pushState({}, "", "/reports/requests?view=conversations&overviewTimeframe=1d");
     renderWithProviders(<App />);
 
-    expect(await screen.findByRole("heading", { name: "Dashboard" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Request records" })).toBeInTheDocument();
     await waitFor(() => expect(overviewCalls).toBeGreaterThan(0));
     expect(overviewTimeframes.at(-1)).toBe("7d");
 
@@ -438,8 +307,7 @@ describe("dashboard flow integration", () => {
     await user.click(timeframeSelect);
     await user.click(await screen.findByRole("option", { name: "30d" }));
 
-    // Regression: the overview query MUST refetch with the new timeframe so the
-    // stat boxes (requests/tokens/cost/etc.) update alongside the conversation list.
+    // The supporting overview query follows the active conversation timeframe.
     await waitFor(() => {
       expect(overviewCalls).toBeGreaterThan(overviewAfterLoad);
     });

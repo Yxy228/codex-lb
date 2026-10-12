@@ -18,8 +18,6 @@ const REQUIRED_API_PATHS = [
   "/api/dashboard-auth/session",
   "/api/dashboard/overview",
   "/api/dashboard/projections",
-  "/api/request-logs/options",
-  "/api/request-logs",
   "/api/settings/telemetry",
 ] as const;
 
@@ -187,6 +185,7 @@ test("the built dashboard accepts real backend responses", async ({ page }) => {
 
   await expect(page.getByRole("heading", { name: "Dashboard", exact: true })).toBeVisible();
   await expect(page.getByText("No accounts connected yet", { exact: true })).toBeVisible();
+  await page.goto("/reports/requests", { waitUntil: "networkidle" });
   await expect(page.getByText("No requests yet", { exact: true })).toBeVisible();
   await expect(page.getByRole("alert")).toHaveCount(0);
 
@@ -213,8 +212,6 @@ test("dashboard usage donuts stay within supported viewports", async ({ page }) 
   // h3 now that a null backend pace falls back to the local projection.
   const usageHeadings = page.getByRole("heading", { level: 3 }).filter({ hasText: /Credits$/ });
   await expect(usageHeadings).toHaveCount(2);
-  const requestTable = page.getByRole("table").first();
-  await expect(requestTable).toBeVisible();
 
   for (const viewportCase of viewportCases) {
     await resizeViewportAndSettle(page, viewportCase.size);
@@ -248,6 +245,29 @@ test("dashboard usage donuts stay within supported viewports", async ({ page }) 
     const summaryRight = await page
       .getByTestId("dashboard-account-summary-line")
       .evaluate((element) => element.getBoundingClientRect().right);
+    expect(documentMetrics.scrollWidth).toBeLessThanOrEqual(documentMetrics.clientWidth);
+    expect(summaryRight).toBeLessThanOrEqual(documentMetrics.clientWidth);
+    for (const metrics of usageMetrics) {
+      expect(metrics.gridColumns).toBe(viewportCase.donutColumns);
+      for (const bounds of [metrics.card, metrics.row, metrics.chart, metrics.legend]) {
+        expect(bounds.left).toBeGreaterThanOrEqual(0);
+        expect(bounds.right).toBeLessThanOrEqual(documentMetrics.clientWidth);
+      }
+    }
+  }
+});
+
+test("request record tables scroll locally within supported viewports", async ({ page }) => {
+  await installMobileContainmentFixtures(page);
+  await page.goto("/reports/requests", { waitUntil: "networkidle" });
+  const requestTable = page.getByRole("table").first();
+  await expect(requestTable).toBeVisible();
+  for (const size of [{ width: 320, height: 568 }, { width: 390, height: 844 }, { width: 1440, height: 900 }]) {
+    await resizeViewportAndSettle(page, size);
+    const documentMetrics = await page.evaluate(() => ({
+      clientWidth: document.documentElement.clientWidth,
+      scrollWidth: document.documentElement.scrollWidth,
+    }));
     const tableMetrics = await requestTable.evaluate((table) => {
       const scroller = table.closest('[data-slot="table-container"]');
       if (!scroller) {
@@ -264,14 +284,6 @@ test("dashboard usage donuts stay within supported viewports", async ({ page }) 
     });
 
     expect(documentMetrics.scrollWidth).toBeLessThanOrEqual(documentMetrics.clientWidth);
-    expect(summaryRight).toBeLessThanOrEqual(documentMetrics.clientWidth);
-    for (const metrics of usageMetrics) {
-      expect(metrics.gridColumns).toBe(viewportCase.donutColumns);
-      for (const bounds of [metrics.card, metrics.row, metrics.chart, metrics.legend]) {
-        expect(bounds.left).toBeGreaterThanOrEqual(0);
-        expect(bounds.right).toBeLessThanOrEqual(documentMetrics.clientWidth);
-      }
-    }
     expect(tableMetrics.overflowX).toBe("auto");
     expect(tableMetrics.tableScrollWidth).toBeGreaterThan(tableMetrics.scrollerClientWidth);
     expect(tableMetrics.scrollerLeft).toBeGreaterThanOrEqual(0);
@@ -294,8 +306,15 @@ test("desktop route navigation resets new pages without overriding query, histor
   await expect(dashboardHeading).toBeInViewport();
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
 
+  await page.getByRole("link", { name: "View reports", exact: true }).click();
+  await page.getByRole("link", { name: "Request records", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Request Logs", exact: true })).toBeVisible();
+  await page.waitForLoadState("networkidle");
+
   await page.evaluate(() => {
     document.body.style.minHeight = "3000px";
+    // Keep the records menu visible while testing a nonzero scroll position.
+    document.querySelector("main")!.style.paddingTop = "800px";
     window.scrollTo({ top: 700, behavior: "instant" });
   });
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(700);
@@ -305,12 +324,17 @@ test("desktop route navigation resets new pages without overriding query, histor
   const queryScrollTop = await page.evaluate(() => window.scrollY);
   expect(queryScrollTop).toBeGreaterThan(0);
   await conversationsItem.click();
-  await expect(page).toHaveURL(/\/dashboard\?view=conversations$/);
+  await expect(page).toHaveURL(/\/reports\/requests\?view=conversations$/);
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(queryScrollTop);
 
   await page.goBack();
-  await expect(page).toHaveURL(/\/dashboard$/);
+  await expect(page).toHaveURL(/\/reports\/requests$/);
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(queryScrollTop);
+
+  await page.goBack();
+  await expect(page).toHaveURL(/\/reports$/);
+  await page.goBack();
+  await expect(page).toHaveURL(/\/dashboard$/);
 
   await page.goBack();
   await expect(page).toHaveURL(/\/settings$/);
