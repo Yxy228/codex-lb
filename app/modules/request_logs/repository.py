@@ -58,6 +58,7 @@ from app.modules.accounts.usage_time_rollup_read import (
     read_hourly_window,
     sum_demand_window,
 )
+from app.modules.request_logs.cache_repository import CacheReportRepository
 
 
 @dataclass(frozen=True, slots=True)
@@ -220,7 +221,7 @@ class ConversationDetailsResult:
     model_stats: list[ConversationModelStatRow]
 
 
-class RequestLogsRepository:
+class RequestLogsRepository(CacheReportRepository):
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 

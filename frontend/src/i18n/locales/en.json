@@ -2100,5 +2100,11 @@
   "dashboard.focusedSubtitle": "Operational health, account availability and remaining capacity.",
   "dashboard.openReports": "View reports",
   "recordsPage.title": "Request records",
-  "recordsPage.subtitle": "Investigate errors, transport, latency and conversation history."
+  "recordsPage.subtitle": "Investigate errors, transport, latency and conversation history.",
+  "cacheAnalysis.assignedKeys": "Assigned keys",
+  "cacheAnalysis.allTraffic": "All traffic (including unassigned)",
+  "cacheAnalysis.selectedScope": "Scope: {{scope}}",
+  "cacheAnalysis.headlineScope": "Headline metrics and trend include hits and misses; cache-state tabs filter records and export only.",
+  "cacheAnalysis.updatedAt": "Updated {{time}}",
+  "cacheAnalysis.cursorPage": "Page {{page}} · {{total}} matching records"
 }

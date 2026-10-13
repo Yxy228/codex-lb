@@ -2100,5 +2100,11 @@
   "dashboard.focusedSubtitle": "운영 상태, 계정 가용성 및 남은 용량.",
   "dashboard.openReports": "보고서 보기",
   "recordsPage.title": "요청 기록",
-  "recordsPage.subtitle": "오류, 전송, 지연 및 대화 기록을 확인하세요."
+  "recordsPage.subtitle": "오류, 전송, 지연 및 대화 기록을 확인하세요.",
+  "cacheAnalysis.assignedKeys": "키가 지정된 요청",
+  "cacheAnalysis.allTraffic": "모든 요청 (미지정 포함)",
+  "cacheAnalysis.selectedScope": "범위: {{scope}}",
+  "cacheAnalysis.headlineScope": "요약과 추세에는 적중과 미적중이 포함됩니다. 캐시 상태 필터는 기록과 내보내기에만 적용됩니다.",
+  "cacheAnalysis.updatedAt": "업데이트 {{time}}",
+  "cacheAnalysis.cursorPage": "{{page}} 페이지 · 일치하는 기록 {{total}}개"
 }

@@ -2100,5 +2100,11 @@
   "dashboard.focusedSubtitle": "服务运行情况、账户可用性与剩余额度。",
   "dashboard.openReports": "查看报表",
   "recordsPage.title": "请求记录",
-  "recordsPage.subtitle": "查看异常、传输与耗时，按会话追踪请求。"
+  "recordsPage.subtitle": "查看异常、传输与耗时，按会话追踪请求。",
+  "cacheAnalysis.assignedKeys": "已归属 Key 的请求",
+  "cacheAnalysis.allTraffic": "全部请求（含未归属）",
+  "cacheAnalysis.selectedScope": "统计范围：{{scope}}",
+  "cacheAnalysis.headlineScope": "顶部指标和趋势包含命中与未命中；缓存状态筛选仅影响记录列表和导出。",
+  "cacheAnalysis.updatedAt": "更新于 {{time}}",
+  "cacheAnalysis.cursorPage": "第 {{page}} 页 · 共 {{total}} 条匹配记录"
 }

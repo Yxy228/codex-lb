@@ -1,14 +1,9 @@
 import { CacheRequestRow, ROW_GRID } from "./cache-request-row";
 import { CacheRequestDetail } from "./cache-request-detail";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import {
-  Database,
-  Download,
-  RefreshCw,
-  Search,
-} from "lucide-react";
+import { Database, Download, RefreshCw, Search } from "lucide-react";
 
 import { AlertMessage } from "@/components/alert-message";
 import { Button } from "@/components/ui/button";
@@ -16,19 +11,14 @@ import { usePermission } from "@/features/auth/hooks/use-auth";
 import { CacheReportExport } from "@/features/dashboard/components/cache-report-export";
 import { requestCacheUsage } from "@/features/dashboard/cache-report";
 import type {
-  FilterState,
   RequestLog,
   RequestLogTimeframe,
 } from "@/features/dashboard/schemas";
 import { ReportsNavigation } from "@/features/reports/components/reports-navigation";
 import { formatCompactNumber } from "@/utils/formatters";
 import { cn } from "@/lib/utils";
-import { loadCacheRequests } from "./data";
-import {
-  cacheAnalysisSummary,
-  filterCacheRequests,
-  type CacheState,
-} from "./model";
+import { getCacheSummary, getCacheRecords } from "./api";
+import { type CacheState } from "./model";
 
 const RANGE_OPTIONS = ["1h", "24h", "7d", "all"] as const;
 const CACHE_STATES = ["all", "hit", "miss", "unknown"] as const;
@@ -48,6 +38,7 @@ function FilterSelect({
     <label className="flex min-w-0 flex-col gap-1.5 text-xs font-medium text-muted-foreground">
       {label}
       <select
+        aria-label={label}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         className="h-10 min-w-0 rounded-lg border bg-background px-3 text-sm font-normal text-foreground outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
@@ -67,75 +58,61 @@ export function CacheAnalysisPage() {
   const canReadKeys = usePermission("api_keys:read");
   const [timeframe, setTimeframe] = useState<RequestLogTimeframe>("24h");
   const [model, setModel] = useState("");
-  const [apiKey, setApiKey] = useState("");
+  const [apiKey, setApiKey] = useState("assigned");
   const [search, setSearch] = useState("");
   const [state, setState] = useState<CacheState>("all");
-  const [page, setPage] = useState(0);
+  const [cursors, setCursors] = useState<(string | null)[]>([null]);
   const [selected, setSelected] = useState<RequestLog | null>(null);
   const query = useQuery({
-    queryKey: ["cache-analysis", timeframe],
-    queryFn: () => loadCacheRequests({ timeframe }),
+    queryKey: [
+      "cache-analysis-summary",
+      timeframe,
+      model,
+      canReadKeys ? apiKey : "assigned",
+      search,
+      canReadKeys,
+    ],
+    queryFn: ({ signal }) =>
+      getCacheSummary(
+        { timeframe, model, apiKey: canReadKeys ? apiKey : "assigned", search },
+        signal,
+      ),
     refetchInterval: 30000,
     refetchIntervalInBackground: false,
     retry: false,
+    placeholderData: (previous) => previous,
   });
-  const requests = useMemo(() => query.data ?? [], [query.data]);
-  const matching = useMemo(
-    () =>
-      filterCacheRequests(requests, {
-        model,
-        apiKey: canReadKeys ? apiKey : "",
-        search,
-        state,
-      }),
-    [requests, model, apiKey, canReadKeys, search, state],
-  );
-  const summary = cacheAnalysisSummary(matching);
-  const models = [...new Set(requests.map((request) => request.model))].sort();
-  const keys = new Map(
-    requests
-      .filter((request) => request.apiKeyId)
-      .map((request) => [
-        request.apiKeyId!,
-        request.apiKeyName || request.apiKeyId!,
-      ]),
-  );
-  const trend = matching
-    .filter(
-      (request) =>
-        request.status === "ok" &&
-        request.requestKind === "normal" &&
-        requestCacheUsage(request)?.percent != null,
-    )
-    .slice(0, 40)
-    .reverse();
-  const pageSize = 15;
-  const currentPage = Math.min(
-    page,
-    Math.max(0, Math.ceil(matching.length / pageSize) - 1),
-  );
-  const rows = matching.slice(
-    currentPage * pageSize,
-    (currentPage + 1) * pageSize,
-  );
-  const exportFilters: FilterState = {
-    timeframe,
-    search: "",
-    accountIds: [],
-    apiKeyIds: [],
-    modelOptions: [],
-    statuses: [],
-    conversationId: null,
-    limit: pageSize,
-    offset: 0,
+  const snapshot = query.isPlaceholderData ? undefined : query.data?.snapshot;
+  const cursor = cursors[cursors.length - 1];
+  const records = useQuery({
+    queryKey: ["cache-analysis-records", snapshot, state, cursor, canReadKeys],
+    queryFn: ({ signal }) =>
+      getCacheRecords(snapshot!, state, cursor, 15, signal),
+    enabled: !!snapshot && query.isSuccess,
+    retry: false,
+  });
+  const summary = query.data?.summary ?? {
+    input: 0,
+    cached: 0,
+    count: 0,
+    hits: 0,
+    percent: null,
+    total: 0,
   };
+  const models = query.data?.models ?? [];
+  const keys = canReadKeys ? (query.data?.apiKeys ?? []) : [];
+  const trend = [...(query.data?.trend ?? [])].reverse();
+  const rows = records.data?.requests ?? [];
+  const total = records.data?.total ?? 0;
+  const currentPage = cursors.length - 1;
   const number = (value: number | null | undefined) =>
     value == null ? "—" : value.toLocaleString(i18n.language);
   const updateFilter = (update: () => void) => {
     update();
-    setPage(0);
+    setCursors([null]);
   };
-  const ready = query.isSuccess;
+  const ready = query.isSuccess && !query.isPlaceholderData;
+  const busy = query.isFetching || records.isFetching;
 
   return (
     <div className="mx-auto w-full max-w-6xl space-y-6 pb-12">
@@ -157,20 +134,17 @@ export function CacheAnalysisPage() {
           <Button
             variant="outline"
             size="sm"
-            disabled={query.isFetching}
-            onClick={() => void query.refetch()}
+            disabled={busy}
+            onClick={() => {
+              setCursors([null]);
+              void query.refetch();
+            }}
           >
-            <RefreshCw
-              className={cn("h-3.5 w-3.5", query.isFetching && "animate-spin")}
-            />
+            <RefreshCw className={cn("h-3.5 w-3.5", busy && "animate-spin")} />
             {t("cacheAnalysis.refresh")}
           </Button>
           {ready ? (
-            <CacheReportExport
-              filters={exportFilters}
-              requests={matching}
-              compact
-            />
+            <CacheReportExport snapshot={snapshot!} state={state} compact />
           ) : (
             <Button variant="outline" size="sm" disabled>
               <Download className="h-3.5 w-3.5" />
@@ -209,9 +183,10 @@ export function CacheAnalysisPage() {
             value={apiKey}
             onChange={(value) => updateFilter(() => setApiKey(value))}
             options={[
-              { value: "", label: t("cacheAnalysis.allKeys") },
+              { value: "assigned", label: t("cacheAnalysis.assignedKeys") },
+              { value: "all", label: t("cacheAnalysis.allTraffic") },
               { value: "unassigned", label: t("cacheAnalysis.unassigned") },
-              ...[...keys].map(([value, label]) => ({ value, label })),
+              ...keys.map(({ id, name }) => ({ value: id, label: name })),
             ]}
           />
         ) : null}
@@ -235,16 +210,37 @@ export function CacheAnalysisPage() {
           </div>
         </label>
       </section>
-      {query.error ? (
+      <p className="text-xs text-muted-foreground" role="status">
+        {t("cacheAnalysis.selectedScope", {
+          scope:
+            apiKey === "assigned" || !canReadKeys
+              ? t("cacheAnalysis.assignedKeys")
+              : apiKey === "all"
+                ? t("cacheAnalysis.allTraffic")
+                : apiKey === "unassigned"
+                  ? t("cacheAnalysis.unassigned")
+                  : (keys.find((key) => key.id === apiKey)?.name ?? apiKey),
+        })}
+        {" · "}
+        {t("cacheAnalysis.headlineScope")}
+        {query.data ? (
+          <>
+            {" "}
+            ·{" "}
+            {t("cacheAnalysis.updatedAt", {
+              time: new Date(query.data.capturedAt).toLocaleTimeString(
+                i18n.language,
+              ),
+            })}
+          </>
+        ) : null}
+      </p>
+      {query.error || records.error ? (
         <AlertMessage variant="error">
-          {t(
-            query.error.message === "cache-limit"
-              ? "dashboard.cacheReport.tooLarge"
-              : "cacheAnalysis.loadError",
-          )}
+          {t("cacheAnalysis.loadError")}
         </AlertMessage>
       ) : null}
-      {query.isPending ? (
+      {query.isPending || query.isPlaceholderData ? (
         <div className="rounded-2xl border bg-card p-16 text-center text-muted-foreground">
           {t("cacheAnalysis.loading")}
         </div>
@@ -395,7 +391,7 @@ export function CacheAnalysisPage() {
               <div className="flex items-baseline gap-2">
                 <h2 className="font-semibold">{t("cacheAnalysis.records")}</h2>
                 <span className="text-xs text-muted-foreground">
-                  {t("cacheAnalysis.recordCount", { count: matching.length })}
+                  {t("cacheAnalysis.recordCount", { count: total })}
                 </span>
               </div>
               <div
@@ -450,6 +446,11 @@ export function CacheAnalysisPage() {
                   </div>
                 ))}
               </div>
+              {records.isPending ? (
+                <p className="p-8 text-center text-sm text-muted-foreground">
+                  {t("cacheAnalysis.loading")}
+                </p>
+              ) : null}
               {rows.map((request, index) => (
                 <CacheRequestRow
                   key={`${request.requestId}-${index}`}
@@ -458,7 +459,7 @@ export function CacheAnalysisPage() {
                 />
               ))}
             </div>
-            {!rows.length ? (
+            {!rows.length && !records.isPending && !records.error ? (
               <div className="px-5 py-14 text-center">
                 <p className="text-sm font-medium">
                   {t("cacheAnalysis.empty")}
@@ -470,33 +471,34 @@ export function CacheAnalysisPage() {
             ) : null}
             <footer className="flex flex-wrap items-center justify-between gap-3 border-t px-5 py-3 text-xs text-muted-foreground">
               <span>
-                {t("cacheAnalysis.pageRange", {
-                  start: matching.length ? currentPage * pageSize + 1 : 0,
-                  end: Math.min((currentPage + 1) * pageSize, matching.length),
-                  total: matching.length,
+                {t("cacheAnalysis.cursorPage", {
+                  page: currentPage + 1,
+                  total: total,
                 })}
               </span>
               <div className="flex gap-2">
                 <Button
                   size="sm"
                   variant="outline"
-                  disabled={currentPage === 0}
-                  onClick={() => setPage(currentPage - 1)}
+                  disabled={currentPage === 0 || busy}
+                  onClick={() => setCursors(cursors.slice(0, -1))}
                 >
                   {t("cacheAnalysis.previous")}
                 </Button>
                 <Button
                   size="sm"
                   variant="outline"
-                  disabled={(currentPage + 1) * pageSize >= matching.length}
-                  onClick={() => setPage(currentPage + 1)}
+                  disabled={!records.data?.nextCursor || busy}
+                  onClick={() =>
+                    setCursors([...cursors, records.data!.nextCursor])
+                  }
                 >
                   {t("cacheAnalysis.next")}
                 </Button>
               </div>
             </footer>
           </section>
-          {canReadKeys && requests.some((request) => !request.apiKeyId) ? (
+          {canReadKeys ? (
             <p className="text-xs text-muted-foreground">
               {t("cacheAnalysis.unassignedExplanation")}
             </p>

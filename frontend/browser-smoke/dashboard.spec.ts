@@ -601,3 +601,34 @@ test("the model source edit dialog keeps Save visible in compact viewports", asy
     expect((await request.delete(`/api/model-sources/${source.id}`)).ok()).toBe(true);
   }
 });
+
+test("cache analysis reads aggregates and bounded records with independent state filtering", async ({ page }) => {
+  const paths: string[] = [];
+  page.on("request", (request) => paths.push(new URL(request.url()).pathname));
+  const summaryResponse = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === "/api/request-logs/cache-summary",
+  );
+  await page.goto("/reports/cache", { waitUntil: "networkidle" });
+  const captured = await summaryResponse;
+  expect(captured.ok()).toBe(true);
+  expect((await captured.json()).scope).toBe("assigned");
+  await expect(page.getByRole("region", { name: "Cache overview" })).toBeVisible();
+  const keyFilter = page.getByLabel("API Key", { exact: true });
+  if (await keyFilter.count()) await expect(keyFilter).toHaveValue("assigned");
+  const overview = await page.getByRole("region", { name: "Cache overview" }).innerText();
+  const summaryCalls = paths.filter((path) => path.endsWith("/cache-summary")).length;
+  const filteredResponse = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return url.pathname.endsWith("/cache-records") && url.searchParams.get("state") === "hit";
+  });
+  await page.getByRole("button", { name: "Hits", exact: true }).click();
+  expect((await filteredResponse).ok()).toBe(true);
+  await expect.poll(() => page.getByRole("region", { name: "Cache overview" }).innerText()).toBe(overview);
+  expect(paths.filter((path) => path.endsWith("/cache-summary"))).toHaveLength(summaryCalls);
+  expect(paths).not.toContain("/api/request-logs");
+  await resizeViewportAndSettle(page, { width: 390, height: 844 });
+  const width = await page.evaluate(() => ({
+    client: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth,
+  }));
+  expect(width.scroll).toBeLessThanOrEqual(width.client);
+});

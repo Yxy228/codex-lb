@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import ValidationError
 
 from app.core.auth.dashboard_access import DashboardPrincipal, Permission
 from app.core.auth.dependencies import (
@@ -17,6 +19,9 @@ from app.modules.dashboard.timeframes import (
     resolve_conversation_timeframe,
     resolve_request_log_timeframe,
 )
+from app.modules.request_logs.cache_repository import CacheScope, CacheState
+from app.modules.request_logs.cache_schemas import CacheRecordsResponse, CacheSummaryResponse
+from app.modules.request_logs.cache_service import CacheReportService
 from app.modules.request_logs.schemas import (
     ConversationDetailsResponse,
     ConversationsResponse,
@@ -69,6 +74,60 @@ def _resolve_request_log_since(
     if timeframe is None:
         return since, None
     return resolve_request_log_timeframe(timeframe), timeframe
+
+
+def _cache_service(context: RequestLogsContext, principal: DashboardPrincipal) -> CacheReportService:
+    return CacheReportService(
+        context.repository,
+        include_sensitive_metadata=principal.has(Permission.CONVERSATIONS_READ),
+        include_api_key_identity=principal.has(Permission.API_KEYS_READ),
+    )
+
+
+@router.get("/cache-summary", response_model=CacheSummaryResponse)
+async def cache_summary(
+    timeframe: Literal["1h", "24h", "7d", "all"] = "24h",
+    scope: CacheScope = "assigned",
+    api_key_id: str | None = Query(default=None, alias="apiKeyId", max_length=200),
+    model: str | None = Query(default=None, max_length=200),
+    search: str | None = Query(default=None, max_length=200),
+    principal: DashboardPrincipal = Depends(validate_dashboard_session),
+    context: RequestLogsContext = Depends(get_request_logs_context),
+) -> CacheSummaryResponse:
+    if scope == "key" or api_key_id:
+        ensure_dashboard_permission(principal, Permission.API_KEYS_READ)
+    try:
+        return await _cache_service(context, principal).summary(
+            timeframe=timeframe,
+            scope=scope,
+            api_key_id=api_key_id,
+            model=model,
+            search=search.strip() if search else None,
+        )
+    except (ValueError, ValidationError) as exc:
+        raise HTTPException(status_code=422, detail="Invalid cache scope or range") from exc
+
+
+@router.get("/cache-records", response_model=CacheRecordsResponse)
+async def cache_records(
+    snapshot: str = Query(max_length=4096),
+    cursor: str | None = Query(default=None, max_length=512),
+    state: CacheState = "all",
+    limit: int = Query(default=15, ge=1, le=1000),
+    principal: DashboardPrincipal = Depends(validate_dashboard_session),
+    context: RequestLogsContext = Depends(get_request_logs_context),
+) -> CacheRecordsResponse:
+    try:
+        return await _cache_service(context, principal).records(
+            snapshot_token=snapshot,
+            cursor_token=cursor,
+            state=state,
+            limit=limit,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail="API key read permission required") from exc
+    except (ValueError, ValidationError) as exc:
+        raise HTTPException(status_code=422, detail="Invalid cache pagination token") from exc
 
 
 @router.get("", response_model=RequestLogsResponse)

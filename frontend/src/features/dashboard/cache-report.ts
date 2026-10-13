@@ -14,22 +14,6 @@ export function requestCacheUsage(request: RequestLog) {
   };
 }
 
-export function summarizeRequestCache(requests: RequestLog[]) {
-  let input = 0;
-  let cached = 0;
-  let count = 0;
-  for (const request of requests) {
-    const usage = requestCacheUsage(request);
-    if (request.status !== "ok" || request.requestKind !== "normal" || !usage || usage.input === 0) {
-      continue;
-    }
-    input += usage.input;
-    cached += usage.cached;
-    count += 1;
-  }
-  return { input, cached, count, percent: input > 0 ? (cached / input) * 100 : null };
-}
-
 function csvCell(value: string | number | null | undefined): string {
   const text = String(value ?? "");
   const safe = /^[\s]*[=+@-]/.test(text) ? `'${text}` : text;

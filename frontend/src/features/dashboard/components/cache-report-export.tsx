@@ -3,18 +3,18 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
-import { loadCacheRequests } from "@/features/cache-analysis/data";
+import { getCacheRecords } from "@/features/cache-analysis/api";
+import type { CacheState } from "@/features/cache-analysis/model";
 import { requestCacheCsv } from "@/features/dashboard/cache-report";
-import type { FilterState, RequestLog } from "@/features/dashboard/schemas";
 
 export function CacheReportExport({
-  filters,
-  requests: loadedRequests,
   compact = false,
+  snapshot,
+  state = "all",
 }: {
-  filters: FilterState;
-  requests?: RequestLog[];
   compact?: boolean;
+  snapshot: string;
+  state?: CacheState;
 }) {
   const { t } = useTranslation();
   const [exporting, setExporting] = useState(false);
@@ -23,23 +23,26 @@ export function CacheReportExport({
     setExporting(true);
     try {
       const now = new Date();
-      const requests =
-        loadedRequests ??
-        (await loadCacheRequests(
-          {
-            timeframe: filters.timeframe,
-            search: filters.search || undefined,
-            accountIds: filters.accountIds,
-            apiKeyIds: filters.apiKeyIds,
-            statuses: filters.statuses,
-            modelOptions: filters.modelOptions,
-            conversationId: filters.conversationId ?? undefined,
-          },
-          now,
-        ));
-      const blob = new Blob([requestCacheCsv(requests)], {
-        type: "text/csv;charset=utf-8",
-      });
+      const chunks: string[] = [];
+      chunks.push(requestCacheCsv([]));
+      let cursor: string | null = null;
+      const seen = new Set<string>();
+      let expectedTotal: number | null = null;
+      let exportedCount = 0;
+      do {
+        const page = await getCacheRecords(snapshot, state, cursor, 1000);
+        expectedTotal ??= page.total;
+        if (page.total !== expectedTotal) throw new Error("cache-incomplete");
+        exportedCount += page.requests.length;
+        const csv = requestCacheCsv(page.requests);
+        chunks.push(csv.slice(csv.indexOf("\r\n") + 2));
+        cursor = page.nextCursor;
+        if (cursor && (seen.has(cursor) || page.requests.length === 0))
+          throw new Error("cache-incomplete");
+        if (cursor) seen.add(cursor);
+      } while (cursor);
+      if (exportedCount !== expectedTotal) throw new Error("cache-incomplete");
+      const blob = new Blob(chunks, { type: "text/csv;charset=utf-8" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
@@ -51,12 +54,7 @@ export function CacheReportExport({
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (error) {
       toast.error(t("dashboard.cacheReport.failed"), {
-        description:
-          error instanceof Error && error.message === "cache-limit"
-            ? t("dashboard.cacheReport.tooLarge")
-            : error instanceof Error
-              ? error.message
-              : undefined,
+        description: error instanceof Error ? error.message : undefined,
       });
     } finally {
       setExporting(false);
